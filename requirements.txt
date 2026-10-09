@@ -1,0 +1,2 @@
+torch
+diffusers>=0.30.0

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfyui-rbg-sampler-scheduler-extras"
+description = "Consolidated extra samplers and schedulers for ComfyUI: DPM++ 2M Sharp, FlowMatch Euler Discrete, and Sigmoid Offset."
+version = "1.0.0"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Ramon Guthrie" }
+]
+keywords = [
+    "comfyui",
+    "custom-nodes",
+    "samplers",
+    "schedulers",
+    "dpmpp",
+    "euler",
+    "flux",
+    "diffusion"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Framework :: ComfyUI",
+]
+dependencies = [
+    "torch",
+    "diffusers>=0.30.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/RamonGuthrie/ComfyUI-RBG-Sampler-Scheduler-Extras"
+Repository = "https://github.com/RamonGuthrie/ComfyUI-RBG-Sampler-Scheduler-Extras"
+"Bug Tracker" = "https://github.com/RamonGuthrie/ComfyUI-RBG-Sampler-Scheduler-Extras/issues"
+
+[tool.comfy]
+PublisherId = "ramonguthrie"
+DisplayName = "ComfyUI-RBG-Sampler-Scheduler-Extras"
+Icon = ""
