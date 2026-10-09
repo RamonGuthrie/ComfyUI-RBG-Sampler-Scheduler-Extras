@@ -1,4 +1,3 @@
-
 <div align="center">
 
 # ComfyUI-RBG-Sampler-Scheduler-Extras
@@ -28,9 +27,8 @@ This pack maintains **full backward compatibility** with workflows created using
 * **Node ID:** `SamplerDPMPP_2M_Sharp`
 * **Category:** `model/sampling/samplers`
 * **Output:** `SAMPLER`
-* **Overview:** A modified variation of the standard DPM++ 2M multistep sampler that applies adjustable sharpening to denoised step history. Originally designed to eliminate blurriness and retain fine textures in diffusion models such as Qwen Image 2.1.
-* **Key Parameter:**
-  * `sharpness`: Controls denoised step sharpening (Default: `0.15`; set to `0.0` for standard DPM++ 2M behavior).
+* **Overview:** An experimental variation of DPM++ 2M (originally distributed for Qwen Image 2.1) that progressively damps the 2nd-order latent history during sampling.
+* **Technical Note:** While branded as "sharpening," mathematically it applies global scalar attenuation to previous-step latent predictions rather than spatial frequency filtering. This introduces a slight trajectory shift during ODE solving that perceptually enhances contrast and texture. Set `sharpness = 0.0` for standard DPM++ 2M behavior.
 
 ---
 
@@ -40,7 +38,7 @@ This pack maintains **full backward compatibility** with workflows created using
 * **Node ID:** `FlowMatchEulerDiscreteScheduler`
 * **Category:** `sampling/custom_sampling/schedulers`
 * **Output:** `SIGMAS` *(Also registers `FlowMatchEulerDiscreteScheduler` directly into standard `KSampler` dropdown menus)*
-* **Overview:** A port of the Diffusers library's FlowMatch Euler Discrete scheduler (popularized by AI-Toolkit and validation pipelines). Exposes granular controls over sigma scheduling.
+* **Overview:** A port of the Diffusers library's FlowMatch Euler Discrete scheduler (popularized by Z-Image Turbo, AI-Toolkit, and validation pipelines). Exposes granular controls over sigma scheduling.
 * **Key Features:** Dynamic shifting, base/max image sequence length scaling, sigma inversion, stochastic sampling, and custom step ranges (`start_at_step` / `end_at_step`).
 
 #### **Sigmoid Offset Scheduler**
@@ -59,6 +57,7 @@ This pack maintains **full backward compatibility** with workflows created using
 
 | Target Model / Architecture | Recommended Sampler | Recommended Scheduler | Suggested Settings & Notes |
 | :--- | :--- | :--- | :--- |
+| **Z-Image Turbo / Z-Image** | Standard `Euler` / `Euler A` | `FlowMatchEulerDiscreteScheduler` | 8–9 steps. Replicates official diffusers pipeline behavior. |
 | **Flux.1 / Chroma** | `Euler` or `DPM++ 2M Sharp` | `SigmoidOffsetScheduler` | `square_k: 1.0`, `base_c: 0.5`. Densifies steps in structure-forming phases. |
 | **Qwen Image / DiTs** | `SamplerDPMPP_2M_Sharp` | `Simple` or `Normal` | `sharpness: 0.15 - 0.20`. Counteracts multi-step smoothing. |
 | **AI-Toolkit Validation** | Standard `Euler` | `FlowMatchEulerDiscreteScheduler` | Matches standalone Diffusers inference scripts 1:1. |
@@ -69,7 +68,7 @@ This pack maintains **full backward compatibility** with workflows created using
 ## 🚀 Installation
 
 ### Option 1: ComfyUI Manager (Easiest)
-1. In ComfyUI, open **ComfyUI Manager** $\rightarrow$ **Install via Git URL**.
+1. In ComfyUI, open **ComfyUI Manager** → **Install via Git URL**.
 2. Paste: `https://github.com/RamonGuthrie/ComfyUI-RBG-Sampler-Scheduler-Extras.git`
 3. Restart ComfyUI.
 
