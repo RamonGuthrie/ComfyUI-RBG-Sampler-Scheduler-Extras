@@ -106,3 +106,15 @@ This project incorporates and consolidates components from the following project
    furnished to do so, subject to the following conditions:
    The above copyright notice and this permission notice shall be included in all
    copies or substantial portions of the Software.
+
+4. ComfyUI_restart_sampling
+   Copyright (c) ssitu
+   Licensed under the MIT License.
+
+5. comfyui-tcd-scheduler
+   Copyright (c) dfl
+   Licensed under the MIT License / Apache License 2.0.
+
+6. ComfyUI-ODE
+   Copyright (c) redhottensors
+   Licensed under the GNU General Public License v3.0 (GPL-3.0).

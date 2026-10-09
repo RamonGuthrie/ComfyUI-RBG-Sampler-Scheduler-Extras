@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-rbg-sampler-scheduler-extras"
-description = "Consolidated extra samplers and schedulers for ComfyUI: DPM++ 2M Sharp, FlowMatch Euler Discrete, and Sigmoid Offset."
-version = "1.0.0"
+description = "Consolidated extra samplers and schedulers for ComfyUI: DPM++ 2M Sharp, FlowMatch Euler, Sigmoid Offset, Restart Sampling, TCD, and Adaptive ODE."
+version = "1.1.0"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 authors = [
@@ -19,6 +19,9 @@ keywords = [
     "dpmpp",
     "euler",
     "flux",
+    "restart-sampling",
+    "tcd",
+    "ode",
     "diffusion"
 ]
 classifiers = [
@@ -29,7 +32,8 @@ classifiers = [
 ]
 dependencies = [
     "torch",
-    "diffusers>=0.30.0"
+    "diffusers>=0.30.0",
+    "torchdiffeq"
 ]
 
 [project.urls]
