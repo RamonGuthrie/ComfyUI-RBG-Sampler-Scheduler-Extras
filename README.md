@@ -26,6 +26,7 @@ This pack maintains **full backward compatibility** with workflows created using
 
 * **Sampler DPM++ 2M Sharp** (`SamplerDPMPP_2M_Sharp`):  
   An experimental variation of DPM++ 2M (originally distributed for Qwen Image 2.1) that progressively damps the 2nd-order latent history during sampling. Perceptually boosts texture and micro-contrast. Set `sharpness = 0.0` for stock DPM++ 2M behavior.
+  * **Technical Note:** While branded as "sharpening," mathematically it applies global scalar attenuation to previous-step latent predictions rather than spatial frequency filtering.
 * **Restart Sampler Suite** (`RestartSampler`, `KSampler With Restarts` [Simple / Advanced / Custom]):  
   Implements the research paper *"Restart Sampling for Improving Generative Processes"*. Periodically re-injects calibrated noise into the latent trajectory to climb back up sigmas and re-denoise, eliminating anatomical defects and artifacts.
 * **Sampler TCD** (`SamplerTCD`):  
