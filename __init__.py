@@ -1,5 +1,5 @@
 """
-ComfyUI-RBG-Sampler-Scheduler-Extras 📦 v1.1.2
+ComfyUI-RBG-Sampler-Scheduler-Extras 📦 v1.1.3
 Consolidated high-precision samplers, schedulers, and error-correction suite.
 
 Upstream Credits & Attribution:
@@ -81,7 +81,6 @@ def calculate_flowmatch_sigmas(
             _, _, h_dim, w_dim = shape
             seq_len = (h_dim // 2) * (w_dim // 2) if (h_dim >= 2 and w_dim >= 2) else (h_dim * w_dim)
 
-    # Linear interpolation in shift space
     m = (max_shift - base_shift) / (max_image_seq_len - base_image_seq_len)
     b = base_shift - m * base_image_seq_len
     mu = m * seq_len + b
@@ -173,7 +172,7 @@ class FlowMatchEulerDiscreteScheduler:
 
 
 # ==============================================================================
-# 2. SAMPLER DPM++ 2M SHARP
+# 2. SAMPLER DPM++ 2M SHARP (envy-ai)
 # ==============================================================================
 
 @torch.no_grad()
@@ -249,7 +248,7 @@ setattr(comfy.k_diffusion.sampling, "sample_dpmpp_2m_sharp", sample_dpmpp_2m_sha
 
 
 # ==============================================================================
-# 3. SIGMOID OFFSET SCHEDULER
+# 3. SIGMOID OFFSET SCHEDULER (silveroxides)
 # ==============================================================================
 
 def calculate_sigmoid_offset_sigmas(
@@ -316,7 +315,7 @@ class SigmoidOffsetScheduler:
 
 
 # ==============================================================================
-# 4. TCD SCHEDULER & SAMPLER
+# 4. TCD SCHEDULER & SAMPLER (dfl)
 # ==============================================================================
 
 class TCDScheduler:
@@ -415,7 +414,7 @@ SamplerTCDEulerA = SamplerTCD
 
 
 # ==============================================================================
-# 5. RESTART SAMPLING SUITE
+# 5. RESTART SAMPLING SUITE (ssitu)
 # ==============================================================================
 
 DEFAULT_RESTART_SEGMENTS = [(3, 2, 0.06, 0.30), (3, 1, 0.30, 0.59)]
@@ -432,7 +431,6 @@ def parse_restart_segments(segment_str: str) -> List[Tuple[int, int, float, floa
             if isinstance(item, (list, tuple)) and len(item) == 4:
                 parsed.append((int(item[0]), int(item[1]), float(item[2]), float(item[3])))
         if parsed:
-            # Sort segments descending by t_min to maintain insertion integrity
             parsed.sort(key=lambda seg: seg[2], reverse=True)
             return parsed
         logger.warning(f"[RBG Extras] No valid 4-tuples found in '{segment_str}'. Using default segments.")
@@ -531,7 +529,6 @@ class RestartSampler:
             combined_args = {**extra_args, **extra_opts}
 
             if not chunked_mode:
-                # Fallback unchunked mode
                 for i in range(len(sigmas) - 1):
                     curr_s = sigmas[i]
                     next_s = sigmas[i + 1]
@@ -550,7 +547,6 @@ class RestartSampler:
                         )
                 return x
 
-            # Chunked Mode: Split sigmas into strictly descending slices
             chunks: List[List[float]] = []
             current_chunk = [float(sigmas[0])]
 
@@ -579,7 +575,6 @@ class RestartSampler:
                     )
                     step_offset[0] += len(chunk_sigmas) - 1
 
-                # Re-noise jump before the start of the next chunk
                 if chunk_idx < len(chunks) - 1:
                     curr_s = torch.tensor(chunk[-1], device=x.device, dtype=x.dtype)
                     next_s = torch.tensor(chunks[chunk_idx + 1][0], device=x.device, dtype=x.dtype)
@@ -986,7 +981,7 @@ def calculate_comfy_linear_quadratic_sigmas(steps: int, threshold_noise: float =
     quadratic_coef = threshold_noise_step_diff / (linear_steps * (quadratic_steps ** 2))
     linear_coef = (threshold_noise / linear_steps) - 2 * threshold_noise_step_diff / (quadratic_steps ** 2)
     const = quadratic_coef * (linear_steps ** 2)
-    
+
     quadratic_sigma_schedule = [
         quadratic_coef * (i ** 2) + linear_coef * i + const
         for i in range(linear_steps, steps)
@@ -1022,7 +1017,6 @@ QWEN_TURBO_PRESETS: Dict[str, List[float]] = {
 
 def calculate_qwen_turbo_sigmas(preset: str = "community_detail_boost_8step", steps: int = 8) -> torch.Tensor:
     """Computes sigmas for Qwen-Image-2.1-Turbo."""
-    # If linear-quadratic is chosen, compute ComfyUI's exact formula dynamically for any step count
     if preset == "linear_quadratic_8step":
         return calculate_comfy_linear_quadratic_sigmas(steps=steps)
 
@@ -1205,7 +1199,6 @@ class SigmaPreview:
         plot_w = w - margin_left - margin_right
         plot_h = h - margin_top - margin_bottom
 
-        # Grid lines
         for i in range(5):
             gy = margin_top + int(plot_h * (i / 4.0))
             draw.line([(margin_left, gy), (w - margin_right, gy)], fill=(40, 40, 48), width=1)
@@ -1228,19 +1221,17 @@ class SigmaPreview:
             for px, py in pts:
                 draw.ellipse([px - 2, py - 2, px + 2, py + 2], fill=color)
 
-        _plot_curve(s1, (0, 220, 255))  # Primary Cyan
+        _plot_curve(s1, (0, 220, 255))
 
         info_lines = [f"Schedule 1: {len(s1)} points | max: {s1.max():.4f} | min: {s1.min():.4f}"]
         if sigmas_compare is not None:
             s2 = sigmas_compare.cpu().numpy()
-            _plot_curve(s2, (255, 140, 0))  # Compare Orange
+            _plot_curve(s2, (255, 140, 0))
             info_lines.append(f"Schedule 2: {len(s2)} points | max: {s2.max():.4f} | min: {s2.min():.4f}")
 
-        # Render Y-axis text
         draw.text((10, margin_top - 6), f"{max_val:.2f}", fill=(180, 180, 180))
         draw.text((10, margin_top + plot_h - 10), "0.00", fill=(180, 180, 180))
 
-        # Output ComfyUI IMAGE tensor [1, H, W, 3]
         np_img = np.array(img).astype(np.float32) / 255.0
         tensor_img = torch.from_numpy(np_img).unsqueeze(0)
 
@@ -1248,9 +1239,10 @@ class SigmaPreview:
 
 
 # ==============================================================================
-# GLOBAL KSAMPLER DROPDOWN INTEGRATION
+# GLOBAL KSAMPLER DROPDOWN INTEGRATION (Samplers & Schedulers)
 # ==============================================================================
 
+# 1. Register Extra Schedulers into KSampler dropdown
 EXT_SCHEDULERS = (
     "FlowMatchEulerDiscreteScheduler",
     "sigmoid_offset",
@@ -1266,6 +1258,34 @@ for sched in EXT_SCHEDULERS:
     if hasattr(comfy.samplers, "SCHEDULERS") and sched not in comfy.samplers.SCHEDULERS:
         comfy.samplers.SCHEDULERS.append(sched)
 
+# 2. Register Extra Samplers into KSampler dropdown & SAMPLER_NAMES (Restored)
+EXT_SAMPLERS = ("dpmpp_2m_sharp", "tcd", "flow_solver_2m", "momentum_euler")
+
+for samp in EXT_SAMPLERS:
+    if samp not in comfy.samplers.KSampler.SAMPLERS:
+        comfy.samplers.KSampler.SAMPLERS.append(samp)
+    if hasattr(comfy.samplers, "SAMPLER_NAMES") and samp not in comfy.samplers.SAMPLER_NAMES:
+        comfy.samplers.SAMPLER_NAMES.append(samp)
+
+# 3. Hook sampler_object so KSamplerSelect & KSampler resolve custom samplers
+_orig_sampler_object = comfy.samplers.sampler_object
+
+
+def _hooked_sampler_object(name):
+    if name == "dpmpp_2m_sharp":
+        return comfy.samplers.KSAMPLER(sample_dpmpp_2m_sharp)
+    if name == "flow_solver_2m":
+        return comfy.samplers.KSAMPLER(sample_flow_solver_2m)
+    if name == "momentum_euler":
+        return comfy.samplers.KSAMPLER(sample_momentum_euler)
+    if name == "tcd":
+        return comfy.samplers.KSAMPLER(sample_tcd)
+    return _orig_sampler_object(name)
+
+
+comfy.samplers.sampler_object = _hooked_sampler_object
+
+# 4. Hook calculate_sigmas so standard KSampler handles extra schedulers
 _orig_calculate_sigmas = comfy.samplers.calculate_sigmas
 
 
@@ -1293,19 +1313,31 @@ comfy.samplers.calculate_sigmas = _hooked_calculate_sigmas
 # ==============================================================================
 
 NODE_CLASS_MAPPINGS = {
+    # 1. FlowMatch Euler Discrete
     "FlowMatchEulerDiscreteScheduler": FlowMatchEulerDiscreteScheduler,
+    # 2. DPM++ 2M Sharp
     "SamplerDPMPP_2M_Sharp": SamplerDPMPP_2M_Sharp,
+    # 3. Sigmoid Offset
     "SigmoidOffsetScheduler": SigmoidOffsetScheduler,
+    # 4. TCD
     "TCDScheduler": TCDScheduler,
     "SamplerTCD": SamplerTCD,
+    "SamplerTCDEulerA": SamplerTCD,  # Backward compatibility alias
+    # 5. Restart Sampling
     "RestartScheduler": RestartScheduler,
     "RestartSampler": RestartSampler,
     "KSamplerWithRestarts": KSamplerWithRestarts,
+    # 6. Adaptive ODE
     "ODESolver": ODESolver,
+    # 7. Flow-Solver 2M
     "SamplerFlowSolver2M": SamplerFlowSolver2M,
+    # 8. Momentum Euler
     "SamplerMomentumEuler": SamplerMomentumEuler,
+    # 9. Resolution-Aware Flow
     "ResolutionAwareFlowScheduler": ResolutionAwareFlowScheduler,
+    # 10. Qwen-Image Turbo
     "QwenImageTurboScheduler": QwenImageTurboScheduler,
+    # 11. Sigma Tools & Preview
     "SigmaSlice": SigmaSlice,
     "SigmaScale": SigmaScale,
     "SigmaConcat": SigmaConcat,
@@ -1319,6 +1351,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SigmoidOffsetScheduler": "Sigmoid Offset Scheduler",
     "TCDScheduler": "TCD Scheduler",
     "SamplerTCD": "Sampler TCD",
+    "SamplerTCDEulerA": "Sampler TCD (Euler A)",
     "RestartScheduler": "Restart Scheduler",
     "RestartSampler": "Restart Sampler",
     "KSamplerWithRestarts": "KSampler With Restarts",
