@@ -1,5 +1,5 @@
 """
-ComfyUI-RBG-Sampler-Scheduler-Extras 📦 v1.1.3
+ComfyUI-RBG-Sampler-Scheduler-Extras 📦 v1.1.4
 Consolidated high-precision samplers, schedulers, and error-correction suite.
 
 Upstream Credits & Attribution:
@@ -966,8 +966,16 @@ class ResolutionAwareFlowScheduler:
 
 
 # ==============================================================================
-# 10. QWEN-IMAGE TURBO SPECIALIZED SCHEDULER
+# 10. UNIFIED QWEN-IMAGE 2.1 SCHEDULER (Base 7B & Turbo)
 # ==============================================================================
+
+# Official scheduler specs from Qwen/Qwen-Image-2.1 scheduler_config.json
+QWEN_BASE_SHIFT = 0.5
+QWEN_MAX_SHIFT = 0.9
+QWEN_BASE_SEQ_LEN = 256
+QWEN_MAX_SEQ_LEN = 8192
+QWEN_SHIFT_TERMINAL = 0.02
+
 
 def calculate_comfy_linear_quadratic_sigmas(steps: int, threshold_noise: float = 0.025) -> torch.Tensor:
     """Exact ComfyUI piecewise linear_quadratic_schedule implementation."""
@@ -992,7 +1000,7 @@ def calculate_comfy_linear_quadratic_sigmas(steps: int, threshold_noise: float =
 
 
 QWEN_TURBO_PRESETS: Dict[str, List[float]] = {
-    # 1. Alibaba Official Core (8 steps; best for text glyphs, counting, strict layout)
+    # 1. Alibaba Official Core (8 steps; from model_index.json)
     "official_diffusers_8step": [
         1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0
     ],
@@ -1012,49 +1020,115 @@ QWEN_TURBO_PRESETS: Dict[str, List[float]] = {
     "extended_quality_14step": [
         1.0, 0.9870, 0.9720, 0.9550, 0.9320, 0.9030, 0.8650, 0.8120, 0.7350, 0.6280, 0.4850, 0.3120, 0.1450, 0.0520, 0.0
     ],
+    # 6. Base Model (7B) Dynamic Curves
+    "base_official_40step": [1.0, 0.0],
+    "base_fast_25step": [1.0, 0.0],
+    "base_highres_50step": [1.0, 0.0],
 }
 
 
-def calculate_qwen_turbo_sigmas(preset: str = "community_detail_boost_8step", steps: int = 8) -> torch.Tensor:
-    """Computes sigmas for Qwen-Image-2.1-Turbo."""
-    if preset == "linear_quadratic_8step":
-        return calculate_comfy_linear_quadratic_sigmas(steps=steps)
-
-    if preset in QWEN_TURBO_PRESETS and steps == (len(QWEN_TURBO_PRESETS[preset]) - 1):
-        return torch.tensor(QWEN_TURBO_PRESETS[preset], dtype=torch.float32)
-
-    base_list = QWEN_TURBO_PRESETS.get(preset, QWEN_TURBO_PRESETS["community_detail_boost_8step"])
-    base = torch.tensor(base_list, dtype=torch.float32)
-    orig_x = torch.linspace(0.0, 1.0, len(base))
-    new_x = torch.linspace(0.0, 1.0, steps + 1)
-
-    sigmas = torch.zeros(steps + 1, dtype=torch.float32)
-    for idx, x_val in enumerate(new_x):
-        idx_right = torch.searchsorted(orig_x, x_val)
-        idx_left = max(0, idx_right - 1)
-        if idx_right >= len(orig_x):
-            sigmas[idx] = base[-1]
+def calculate_qwen_sigmas(
+    preset: str = "official_diffusers_8step",
+    steps: int = 8,
+    dynamic_2k_shift: bool = False,
+    latent_image: Optional[Dict[str, torch.Tensor]] = None,
+) -> torch.Tensor:
+    """Computes sigmas for Qwen-Image-2.1 with optional dynamic token-length shifting."""
+    # 1. Base 7B Generation
+    if preset.startswith("base_"):
+        if preset == "base_fast_25step" and steps == 8:
+            target_steps = 25
+        elif preset == "base_highres_50step" and steps == 8:
+            target_steps = 50
+        elif preset == "base_official_40step" and steps == 8:
+            target_steps = 40
         else:
-            denom = orig_x[idx_right] - orig_x[idx_left]
-            weight = (x_val - orig_x[idx_left]) / (denom if denom > 1e-7 else 1e-7)
-            sigmas[idx] = (1.0 - weight) * base[idx_left] + weight * base[idx_right]
-    sigmas[-1] = 0.0
+            target_steps = steps
+
+        timesteps = torch.linspace(1.0, QWEN_SHIFT_TERMINAL, target_steps, dtype=torch.float32)
+        timesteps = torch.cat([timesteps, torch.tensor([0.0])])
+
+        # Base models use dynamic shift by default
+        seq_len = 1024
+        if latent_image is not None and "samples" in latent_image:
+            samples = latent_image["samples"]
+            _, _, h_dim, w_dim = samples.shape
+            seq_len = (h_dim // 2) * (w_dim // 2) if (h_dim >= 2 and w_dim >= 2) else (h_dim * w_dim)
+
+        m = (QWEN_MAX_SHIFT - QWEN_BASE_SHIFT) / (QWEN_MAX_SEQ_LEN - QWEN_BASE_SEQ_LEN)
+        b = QWEN_BASE_SHIFT - m * QWEN_BASE_SEQ_LEN
+        mu = m * seq_len + b
+        shift = float(math.exp(mu))
+
+        sigmas = shift * timesteps / (1.0 + (shift - 1.0) * timesteps)
+        sigmas[-1] = 0.0
+        return sigmas
+
+    # 2. Linear-Quadratic Mode
+    if preset == "linear_quadratic_8step":
+        sigmas = calculate_comfy_linear_quadratic_sigmas(steps=steps)
+    elif preset in QWEN_TURBO_PRESETS and steps == (len(QWEN_TURBO_PRESETS[preset]) - 1):
+        sigmas = torch.tensor(QWEN_TURBO_PRESETS[preset], dtype=torch.float32)
+    else:
+        # Interpolation fallback for non-standard step counts
+        base_list = QWEN_TURBO_PRESETS.get(preset, QWEN_TURBO_PRESETS["community_detail_boost_8step"])
+        base = torch.tensor(base_list, dtype=torch.float32)
+        orig_x = torch.linspace(0.0, 1.0, len(base))
+        new_x = torch.linspace(0.0, 1.0, steps + 1)
+
+        sigmas = torch.zeros(steps + 1, dtype=torch.float32)
+        for idx, x_val in enumerate(new_x):
+            idx_right = torch.searchsorted(orig_x, x_val)
+            idx_left = max(0, idx_right - 1)
+            if idx_right >= len(orig_x):
+                sigmas[idx] = base[-1]
+            else:
+                denom = orig_x[idx_right] - orig_x[idx_left]
+                weight = (x_val - orig_x[idx_left]) / (denom if denom > 1e-7 else 1e-7)
+                sigmas[idx] = (1.0 - weight) * base[idx_left] + weight * base[idx_right]
+        sigmas[-1] = 0.0
+
+    # 3. Dynamic 2K Resolution-Aware Shift (Restored)
+    if dynamic_2k_shift:
+        seq_len = 1024
+        if latent_image is not None and "samples" in latent_image:
+            samples = latent_image["samples"]
+            _, _, h_dim, w_dim = samples.shape
+            seq_len = (h_dim // 2) * (w_dim // 2) if (h_dim >= 2 and w_dim >= 2) else (h_dim * w_dim)
+
+        m = (QWEN_MAX_SHIFT - QWEN_BASE_SHIFT) / (QWEN_MAX_SEQ_LEN - QWEN_BASE_SEQ_LEN)
+        b = QWEN_BASE_SHIFT - m * QWEN_BASE_SEQ_LEN
+        mu = m * seq_len + b
+        shift = float(math.exp(mu))
+
+        # Warps the trajectory based on the sequence length
+        sigmas = shift * sigmas / (1.0 + (shift - 1.0) * sigmas)
+        sigmas[-1] = 0.0
+
     return sigmas
 
 
+calculate_qwen_turbo_sigmas = calculate_qwen_sigmas
+
+
 class QwenImageTurboScheduler:
-    """Step-allocation scheduler for Qwen-Image-2.1-Turbo."""
+    """Specialized scheduler for Qwen-Image-2.1 Turbo & Base models with optional 2K dynamic shifting."""
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "preset": (
                     list(QWEN_TURBO_PRESETS.keys()),
-                    {"default": "community_detail_boost_8step",
-                     "tooltip": "official_diffusers (text/layout), community_detail (skin/pores), linear_quadratic (matches BasicScheduler), or extended (2K quality)."}
+                    {"default": "official_diffusers_8step",
+                     "tooltip": "official_diffusers_8step (text/layout), community_detail_boost_8step (skin/pores), linear_quadratic_8step (matches BasicScheduler), extended (2K quality), or base_* (7B 25-50 steps)."}
                 ),
-                "steps": ("INT", {"default": 8, "min": 1, "max": 30, "step": 1,
-                                  "tooltip": "Step count. Match the preset length for exact tables, or change to interpolate."}),
+                "steps": ("INT", {"default": 8, "min": 1, "max": 100, "step": 1,
+                                  "tooltip": "Step count. Match preset length for exact tables, or change to interpolate."}),
+                "dynamic_2k_shift": ("BOOLEAN", {"default": False,
+                                                 "tooltip": "Restored: Enables resolution-dependent time-shift scaling using Qwen's official max_seq_len=8192, max_shift=0.9 specs."}),
+            },
+            "optional": {
+                "latent_image": ("LATENT", {"tooltip": "Optional latent to auto-scale dynamic shift up to 2K resolution (8192 tokens)."}),
             }
         }
 
@@ -1063,9 +1137,18 @@ class QwenImageTurboScheduler:
     CATEGORY = "✨RBG-Suite-Pack/Schedulers"
     FUNCTION = "get_sigmas"
 
-    def get_sigmas(self, preset: str, steps: int):
-        sigmas = calculate_qwen_turbo_sigmas(preset=preset, steps=steps)
+    def get_sigmas(
+        self, preset: str, steps: int, dynamic_2k_shift: bool = False,
+        latent_image: Optional[Dict[str, torch.Tensor]] = None
+    ):
+        sigmas = calculate_qwen_sigmas(
+            preset=preset, steps=steps, dynamic_2k_shift=dynamic_2k_shift, latent_image=latent_image
+        )
         return (sigmas,)
+
+
+# Backward-compatible alias
+QwenImageScheduler = QwenImageTurboScheduler
 
 
 # ==============================================================================
@@ -1250,6 +1333,7 @@ EXT_SCHEDULERS = (
     "qwen_turbo_detail_boost",
     "qwen_turbo_official",
     "qwen_turbo_linear_quadratic",
+    "qwen_base_40step_dynamic",
 )
 
 for sched in EXT_SCHEDULERS:
@@ -1258,7 +1342,7 @@ for sched in EXT_SCHEDULERS:
     if hasattr(comfy.samplers, "SCHEDULERS") and sched not in comfy.samplers.SCHEDULERS:
         comfy.samplers.SCHEDULERS.append(sched)
 
-# 2. Register Extra Samplers into KSampler dropdown & SAMPLER_NAMES (Restored)
+# 2. Register Extra Samplers into KSampler dropdown & SAMPLER_NAMES
 EXT_SAMPLERS = ("dpmpp_2m_sharp", "tcd", "flow_solver_2m", "momentum_euler")
 
 for samp in EXT_SAMPLERS:
@@ -1290,12 +1374,14 @@ _orig_calculate_sigmas = comfy.samplers.calculate_sigmas
 
 
 def _hooked_calculate_sigmas(model_sampling, scheduler_name, steps):
+    if scheduler_name == "qwen_base_40step_dynamic":
+        return calculate_qwen_sigmas(preset="base_official_40step_dynamic", steps=steps)
     if scheduler_name == "qwen_turbo_detail_boost":
-        return calculate_qwen_turbo_sigmas(preset="community_detail_boost_8step", steps=steps)
+        return calculate_qwen_sigmas(preset="turbo_community_detail_8step", steps=steps)
     if scheduler_name == "qwen_turbo_official":
-        return calculate_qwen_turbo_sigmas(preset="official_diffusers_8step", steps=steps)
+        return calculate_qwen_sigmas(preset="turbo_official_8step", steps=steps)
     if scheduler_name == "qwen_turbo_linear_quadratic":
-        return calculate_qwen_turbo_sigmas(preset="linear_quadratic_8step", steps=steps)
+        return calculate_qwen_sigmas(preset="turbo_linear_quadratic_8step", steps=steps)
     if scheduler_name == "FlowMatchEulerDiscreteScheduler":
         return calculate_flowmatch_sigmas(steps=steps)
     if scheduler_name == "sigmoid_offset":
@@ -1335,8 +1421,9 @@ NODE_CLASS_MAPPINGS = {
     "SamplerMomentumEuler": SamplerMomentumEuler,
     # 9. Resolution-Aware Flow
     "ResolutionAwareFlowScheduler": ResolutionAwareFlowScheduler,
-    # 10. Qwen-Image Turbo
-    "QwenImageTurboScheduler": QwenImageTurboScheduler,
+    # 10. Unified Qwen-Image 2.1 (Base & Turbo)
+    "QwenImageScheduler": QwenImageScheduler,
+    "QwenImageTurboScheduler": QwenImageScheduler,  # Backward compatibility alias
     # 11. Sigma Tools & Preview
     "SigmaSlice": SigmaSlice,
     "SigmaScale": SigmaScale,
@@ -1359,7 +1446,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SamplerFlowSolver2M": "Sampler Flow-Solver 2M (Rectified Flow)",
     "SamplerMomentumEuler": "Sampler Momentum Euler (TADA)",
     "ResolutionAwareFlowScheduler": "Resolution-Aware Flow Scheduler",
-    "QwenImageTurboScheduler": "Qwen-Image Turbo Scheduler",
+    "QwenImageScheduler": "Qwen-Image 2.1 Scheduler (Base & Turbo)",
+    "QwenImageTurboScheduler": "Qwen-Image Turbo Scheduler (Legacy)",
     "SigmaSlice": "Sigma Slice",
     "SigmaScale": "Sigma Scale",
     "SigmaConcat": "Sigma Concat",
